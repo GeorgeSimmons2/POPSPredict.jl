@@ -113,7 +113,7 @@ function POPS!(model, train, solver, number_of_committee_members)
     # methods of set_committee!() that match a matrix input as the second argument, so
     # we need the co_coeffs as a vector of vectors
     ACEpotentials.Models.set_linear_parameters!(model, coeffs)
-    co_coeffs = [δθ[i, :] for i = 1:size(δθ[:,1])[1]] #Make sure to add global coeffs here
+    co_coeffs = [δθ[i, :] for i = 1:size(δθ[:,1])[1]]
     set_committee!(model, co_coeffs);
 end
 
@@ -136,6 +136,7 @@ function plot!(; E_POPS, E_mean, name = "POPS", rattles)
     ylabel!("E (eV)")
     savefig("$name.png")
 end
+
 percentile_clipping= 25.0
 number_of_committee_members = 3
 number_of_features = 5
@@ -172,12 +173,15 @@ savefig("sin_fit.png")
 num_in_committee = 1000
 POPS!(model, train, solver, num_in_committee)
 
+
+
 # I am not entirely sure, but I think that this is the correct handling for 
 # setting committee coefficients. The co_effs = [...] is because there are no
 # methods of set_committee!() that match a matrix input as the second argument, so
 # we need the co_coeffs as a vector of vectors
 
 
+ 
 rattle_levels = [0.1, 0.2, 0.3, 0.4, 0.5]
 E_POPS = zeros((length(rattle_levels), num_in_committee))
 E_mean = zeros(length(rattle_levels))	
