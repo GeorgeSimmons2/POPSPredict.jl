@@ -234,7 +234,10 @@ for i = 1:length(lattice_consts)
 end
 
 scatter(volumes, energies, xlabel="Volume (Å)", ylabel="Energy (eV)")
-savefig("eos.png")
+for i = 1:num_in_committee
+    scatter!(volumes, co_energies[:,i], primary=false)
+end
+savefig("eos_with_pops.png")
 
 ucell    = bulk(sym, cubic = true)
 ucell, _ = GeomOpt.minimise(ucell, model; variablecell=true)
