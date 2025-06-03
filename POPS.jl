@@ -13,7 +13,7 @@ model          = ace1_model(elements = [sym,], order = 3, totaldegree = [20,16,1
 train, test, _ = ACEpotentials.example_dataset("Zuo20_$sym")
 solver         = ACEfit.BLR(; factorization = :svd)
 
-train = train[1:29:end]
+train = train[1:20:end]
 
 function POPS(A, Γ, coeffs, Y)
     local H = (transpose(Γ) * Γ + transpose(A) * A)
@@ -208,7 +208,7 @@ using GeomOpt
 using AtomsBuilder, GeomOpt, AtomsCalculators, AtomsBase
 using AtomsBase: FlexibleSystem, FastSystemi
 
-n = 120
+n = 100
 lattice_consts = collect(range(3.5, 5.5, n))
 volumes        = zeros(n)
 energies       = zeros(n)
@@ -232,32 +232,75 @@ for i = 1:length(lattice_consts)
     @show E
     volumes[i] = ustrip(volume)
 end
+function OLS(x::Vector, y::Vector; degree::Int=3)
+    n = length(x)
+    X = zeros(n, degree + 1)
+        for i in 0:degree
+            X[:, i+1] .= x .^ i
+        end
+    coeffs = X \ y
+    return coeffs, X
+end
+function QoI(coeffs)
+    c0, c1, c2, c3 = coeffs
+    a = 3.0*c3
+    b = 2.0*c2
+    c = c1
+    v0= (- b + sqrt(b ^ 2 - 4 * a * c)) / (2 * a)
+    e0= c0 + c1 * v0 + c2 * v0^2 + c3 * v0^3
+    B = (2 * c2 + 6 * c3 * v0) * v0
+    return v0, e0, B
+end
+
+coeffs, design_matrix = OLS(volumes, energies)
+v0, e0, B = QoI(coeffs)
+
+function OLS(x, y)
+    number_of_features = 4
+    design_matrix = zeros((length(x), number_of_features))
+    for i = 1:number_of_features
+        design_matrix[:, i] = x .^ (i-1)
+    end
+    coeffs = design_matrix \ y
+    return coeffs, design_matrix
+end
+plot(volumes, design_matrix * coeffs)
+
+scatter!(volumes, energies)
+savefig("Curve_fit.png")
 
 scatter(volumes, energies, xlabel="Volume (Å)", ylabel="Energy (eV)")
 for i = 1:num_in_committee
-    scatter!(volumes, co_energies[:,i], primary=false)
+    scatter!(volumes, co_energies[:,i], primary=false, markercolor = i+1, markersize = 3.0)
 end
-savefig("eos_with_pops.png")
+savefig("eos_with_pops$(num_in_committee).png")
 
-ucell    = bulk(sym, cubic = true)
-ucell, _ = GeomOpt.minimise(ucell, model; variablecell=true)
+#ucell    = bulk(sym, cubic = true)
+#ucell, _ = GeomOpt.minimise(ucell, model; variablecell=true)
 
-Eparat, co_Eparat = (@committee potential_energy(ucell, model)) ./ length(ucell)
+#Eparat, co_Eparat = (@committee potential_energy(ucell, model)) ./ length(ucell)
 
-sys = _flexiblesystem(ucell) * (2, 2, 2)
+function _flexiblesystem(sys) 
+    c3ll = cell(sys)
+    particles = [ AtomsBase.Atom(species(sys, i), position(sys, i)) 
+                  for i = 1:length(sys) ] 
+    return FlexibleSystem(particles, c3ll)
+end; 
 
-deleteat!(sys,1)
+# sys = _flexiblesystem(ucell) * (2, 2, 2)
 
-vacancy_equil, result = GeomOpt.minimise(sys,model;variablecell=false)
+# deleteat!(sys,1)
 
-E_vac, co_E_vac =  @committee potential_energy(vacancy_equil, model)
-E_def = E_vac - length(sys) * Eparat
-co_E_def = co_E_vac .- (length(sys) .* co_Eparat)
-@show E_def
-@show co_E_def
-
-E_def = ustrip(E_def); co_E_def = ustrip(co_E_def)
-
-scatter(ones(length(co_E_def)), co_E_def, label = "pops committee")
-scatter!([1,], [E_def,], markercolor = 2, label = "Mean")
-savefig("functions_Vacancy_formation_energy_POPS.png")
+# vacancy_equil, result = GeomOpt.minimise(sys,model;variablecell=false)
+# 
+# E_vac, co_E_vac =  @committee potential_energy(vacancy_equil, model)
+# E_def = E_vac - length(sys) * Eparat
+# co_E_def = co_E_vac .- (length(sys) .* co_Eparat)
+# @show E_def
+# @show co_E_def
+# 
+# E_def = ustrip(E_def); co_E_def = ustrip(co_E_def)
+# 
+# scatter(ones(length(co_E_def)), co_E_def, label = "pops committee")
+# scatter!([1,], [E_def,], markercolor = 2, label = "Mean")
+# savefig("functions_Vacancy_formation_energy_POPS.png")
