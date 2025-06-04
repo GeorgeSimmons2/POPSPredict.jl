@@ -53,7 +53,7 @@ function sample_hypercube(bounds, number_of_committee_members, V, coeffs)
 end
 
 function POPS!(model, train, solver, number_of_committee_members)
-    # Creates Γ - the ridge regression/Tikhonov regulariser
+    # Creates Γ - the ridge regression/Tikhonov regulariser/ prior covariance matrix
     Γ      = ACEpotentials._make_prior(model, 4, nothing)
     
     # Constructs all the stuff we need to construct our problem
@@ -64,52 +64,13 @@ function POPS!(model, train, solver, number_of_committee_members)
     result = ACEfit.solve(solver, Ap, Y_)
     local coeffs = Γ \ result["C"]
     
-    # The "H" matrix
-#     H = (transpose(Γ)*Γ + transpose(A)*A)
-#     
-#     H_inv = H^-1
-#     
-#     # For storing the pointwise corrections to the parameters
-#     dθ = ones(size(A))
-#     
-#     # This is the basic loop of getting updated parameters to build the 
-#     # hypercube from - this is algorithm 1 in appendix E of the paper.
-#     for i = 1:size(A[:, 1])[1]
-#         leverage = transpose(A[i, :]) * H_inv * A[i, :]
-#         E        = transpose(A[i, :]) * coeffs
-#         dy       = Y[i] - E
-#         dθ[i, :] = (dy / leverage) .* H_inv * A[i, :]
-##     end
-    percentile_clipping = 45.0
+    percentile_clipping = 25.0
     dθ = POPS(A, Γ, coeffs, Y)
     bounds, V = hypercube(dθ, percentile_clipping)
     δθ = sample_hypercube(bounds, number_of_committee_members, V, coeffs)
-    # This is the hypercube part of the process - algorithm 2 in appendix E.
-#    U, S, V = svd(dθ)
-#    
-#    projected = dθ * V
-#    
-#    # This is the naive implementation where we just use a percentile clipping to get 
-#    # rid of insane parameter bounds
-#    percentile_clipping = 25.0
-#    lower  = [quantile(projected[:, i], percentile_clipping / 100.0) for i in 1:size(projected[1,:])[1]]
-#    upper  = [quantile(projected[:, i], 1.0 - percentile_clipping / 100.0) for i in 1:size(projected[1,:])[1]] 
-#    bounds = hcat(lower, upper)
-#    
-#    # Setting up for sampling for committee
-#    num_in_committee = 50
-#    δθ = zeros((num_in_committee, size(bounds)[1]))
-#    E_mean = sum(A * coeffs)
-#    E_POPS = zeros(num_in_committee)
-#    
-#    for j = 1:num_in_committee
-#        U  = rand(Float64, size(bounds)[1])
-#        δθ[j, :] = transpose(V) * (lower .+ upper .* U)
-#    end
     
 
-    # I am not entirely sure, but I think that this is the correct handling for 
-    # setting committee coefficients. The co_effs = [...] is because there are no
+    # The co_effs = [...] is because there are no
     # methods of set_committee!() that match a matrix input as the second argument, so
     # we need the co_coeffs as a vector of vectors
     ACEpotentials.Models.set_linear_parameters!(model, coeffs)
@@ -117,88 +78,74 @@ function POPS!(model, train, solver, number_of_committee_members)
     set_committee!(model, co_coeffs);
 end
 
-
-function plot!(; E_POPS = E_POPS, E_mean = E_mean, name = "POPS")
-    y_ = ones(length(E_POPS))
-    x_ = ones(length(E_POPS))
-    y_[1:end] = E_POPS
-    scatter(x_, y_, label = "pops committee")
-    scatter!([1,], [E_mean,], markercolor = 2, label = "mean")
-    xlabel!("")
-    savefig("$name.png")
-end
-function plot!(; E_POPS, E_mean, name = "POPS", rattles)
-    scatter(rattles, E_mean, label = "global coeffs")
-    for i =1:length(rattles)
-        scatter!(ones(length(E_POPS)) .* rattles[i], E_POPS[i, :], markercolor = 2, label = "POPS committee")
-    end
-    xlabel!("Rattle")
-    ylabel!("E (eV)")
-    savefig("$name.png")
-end
-
-r_max = 10
-percentile_clipping= 25.0
-number_of_committee_members = 3
-number_of_features = 10
-x = collect(range(- r_max, r_max, 10))
-true_func = sin.(x) .+ x
-design_matrix = zeros((length(x), number_of_features))
-for i = 1:number_of_features
-   design_matrix[:, i] = x .^ i
-end
-m, n = size(design_matrix)
-Γ = Matrix{Float64}(I, m, n)
-coeffs = design_matrix \ true_func
-dθ = POPS(design_matrix, Γ, coeffs, true_func)
-bounds, V = hypercube(dθ, percentile_clipping)
-println(size(V), size(bounds))
-println(size(design_matrix))
-δθ = sample_hypercube(bounds, number_of_committee_members, V, coeffs)
-y_predict = design_matrix * coeffs
-plot(x, true_func, label = "True")
-scatter!(x, design_matrix * coeffs, label = "Global")
-for j = 1:number_of_committee_members
-    x_ = collect(range(-r_max, r_max, 20))
-    temp_coeffs = δθ[j, :]
-    design_matrix = zeros((length(x_), number_of_features))
+function curve_fit()
+    r_max = 1
+    percentile_clipping=0.0
+    number_of_committee_members = 100
+    number_of_features = 7
+    num = 2000
+    x = collect(range(- r_max, r_max, num))
+    true_func = cos.(2.0 * π.*(x.-0.5)) ./ (10.0 .- 5.0 .* x)
+    design_matrix = zeros((length(x), number_of_features))
     for i = 1:number_of_features
-        design_matrix[:, i] = x_ .^ i
+    	design_matrix[:, i] = x .^ (i-1)
     end
-    Y_pred = design_matrix * temp_coeffs
-    scatter!(x_, Y_pred)
+    m, n = size(design_matrix)
+    Γ = Matrix{Float64}(I, m, n)
+    coeffs = design_matrix \ true_func
+    dθ = POPS(design_matrix, Γ, coeffs, true_func)
+    bounds, V = hypercube(dθ,percentile_clipping)
+    println(size(V), size(bounds))
+    println(size(design_matrix))
+    δθ = sample_hypercube(bounds, number_of_committee_members, V, coeffs)
+    println(bounds)
+    plot(x, true_func, label = "True")
+    y_predict = design_matrix * coeffs
+    design_matrix = zeros((40, number_of_features))
+    x_ = ones(40)
+    for i = 1:number_of_features
+        design_matrix[:, i] = x_ .^ (i-1)
+    end
+    scatter!(x_, design_matrix * coeffs, label = "Global")
+    num = 40
+    sin_pred = zeros(number_of_committee_members, num)
+    x        = collect(range(-r_max, r_max, num))
+    for j = 1:number_of_committee_members
+        x_ = collect(range(-r_max, r_max, num))
+        temp_coeffs = δθ[j, :]
+        design_matrix = zeros((length(x_), number_of_features))
+        for i = 1:number_of_features
+    	    design_matrix[:, i] = x_ .^ (i-1)
+        end
+        sin_pred[j, :] =design_matrix * temp_coeffs
+    end
+    for i in 1:number_of_committee_members
+        scatter!(x, sin_pred[i,:], primary=false, markercolor=i+1)
+    
+    end
+    savefig("sin_fit.png")
 end
-savefig("sin_fit.png")
 
-
-num_in_committee = 1000
+num_in_committee = 20
 POPS!(model, train, solver, num_in_committee)
 
 
 
 
-# I am not entirely sure, but I think that this is the correct handling for 
-# setting committee coefficients. The co_effs = [...] is because there are no
-# methods of set_committee!() that match a matrix input as the second argument, so
-# we need the co_coeffs as a vector of vectors
-
-
- 
-rattle_levels = [0.1, 0.2, 0.3, 0.4, 0.5]
-E_POPS = zeros((length(rattle_levels), num_in_committee))
-E_mean = zeros(length(rattle_levels))
-
-for i = 1:length(rattle_levels)
-    ucell   = bulk(sym, cubic = true)
-    rattle!(ucell, rattle_levels[i])
-    E, co_E = @committee potential_energy(ucell, model)
-    E = ustrip(E); co_E = ustrip(co_E);
-    E_mean[i]   = E
-    E_POPS[i,:] = co_E
-end
- 
-plot!(E_POPS=E_POPS, E_mean=E_mean, name = "$(num_in_committee)_coeff_+functions_$(percentile_clipping)_p_clip_rattles_pop", rattles = rattle_levels)
-
+function rattle_committee()
+    rattle_levels = [0.1, 0.2, 0.3, 0.4, 0.5]
+    E_POPS = zeros((length(rattle_levels), num_in_committee))
+    E_mean = zeros(length(rattle_levels))
+    
+    for i = 1:length(rattle_levels)
+        ucell   = bulk(sym, cubic = true)
+        rattle!(ucell, rattle_levels[i])
+        E, co_E = @committee potential_energy(ucell, model)
+        E = ustrip(E); co_E = ustrip(co_E);
+        E_mean[i]   = E
+        E_POPS[i,:] = co_E
+    end
+end     
 
 # Here onwards is stuff ripped from the tutorial on ACEpotentials+AtomsBase
 # with an attempt to tackle committees too. The committee aspect for geometry
@@ -246,12 +193,15 @@ function QoI(coeffs)
     a = 3.0*c3
     b = 2.0*c2
     c = c1
+    if (b ^ 2 - 4 * a * c < 0)
+	return (0, 0, 0)
+    end
     v0= (- b + sqrt(b ^ 2 - 4 * a * c)) / (2 * a)
     e0= c0 + c1 * v0 + c2 * v0^2 + c3 * v0^3
     B = (2 * c2 + 6 * c3 * v0) * v0
     return v0, e0, B
 end
-
+i, j, k = QoI([-1,-2,-3,-4])
 coeffs, design_matrix = OLS(volumes, energies)
 v0, e0, B = QoI(coeffs)
 
@@ -269,12 +219,25 @@ plot(volumes, design_matrix * coeffs)
 scatter!(volumes, energies)
 savefig("Curve_fit.png")
 
+
+
 scatter(volumes, energies, xlabel="Volume (Å)", ylabel="Energy (eV)")
 for i = 1:num_in_committee
-    scatter!(volumes, co_energies[:,i], primary=false, markercolor = i+1, markersize = 3.0)
+    scatter!(volumes, co_energies[:,i], primary=false, markercolor = i+1, markersize = 2.0)
 end
 savefig("eos_with_pops$(num_in_committee).png")
 
+scatter([1,], [B,], xlabel = "Volume (Å)", ylabel = "Bulk Modulus (ev Å^-3)", label = "Global", markercolor = 1)
+for i = 1:num_in_committee
+    coeffs, _ = OLS(volumes, co_energies[:, i])
+    v0, e0, B = QoI(coeffs)
+    if (B == 0)
+	continue
+    end
+    scatter!([1,], [B,], primary = false, markercolor = 2)
+end
+scatter!([1,], [B,], primary = false, markercolor = 1)
+savefig("bogus_bulk.png")
 #ucell    = bulk(sym, cubic = true)
 #ucell, _ = GeomOpt.minimise(ucell, model; variablecell=true)
 
